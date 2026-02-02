@@ -214,6 +214,42 @@ The target’s **Build Settings → Info.plist File** still points to your plist
 
 ---
 
+## Milestone 2: FFT / Spectrum (RealtimeAudioAnalyzer)
+
+The **RealtimeAudioAnalyzer** wires microphone capture, **RealtimeFFTEngine** (FFT), and level metering (RMS/Peak), and emits rate-limited events `RealtimeAudioAnalyzer:onData` with real computed values.
+
+### Analysis options (startAnalysis)
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| **fftSize** | Int | 1024 | FFT size (power of 2). Hann windowing is applied inside `RealtimeFFTEngine`. |
+| **downsampleBins** | Int | 256 | Target number of output frequency bins: **256** or **512**. |
+| **refreshRateHz** | Double | 30 | Target event emission rate (Hz). Events are rate-limited using monotonic time; audio thread stays real-time safe. |
+| sampleRate, channels, bufferSize | Int | 48000, 1, 1024 | Mic capture config. |
+| includeTimeData | Bool | false | If true, payload includes optional `timeData`; Milestone 2 does not require it. |
+
+### Event payload keys (RealtimeAudioAnalyzer:onData)
+
+| Key | Type | Description |
+|-----|------|-------------|
+| **timestamp** | Double | Milliseconds since **epoch** (UTC). |
+| **rms** | Double | RMS level, linear **0..1**. |
+| **peak** | Double | Peak level, linear **0..1**. |
+| **volume** | Double | Alias of `rms`. |
+| **sampleRate** | Double | Actual sample rate. |
+| **fftSize** | Int | FFT size used. |
+| **frequencyData** | Array | Magnitudes, linear **0..1**, length **256** or **512** as configured. |
+| **timeData** | Array (optional) | Present only when `includeTimeData` is true. |
+
+- **No pitch detection**: This module does not perform or invoke pitch detection.
+
+### Lifecycle
+
+- **startAnalysis(options:onData:)**: Initializes mic, configures FFT engine (`fftSize`, `downsampleBins`), and begins emitting rate-limited events.
+- **stopAnalysis()**: Removes tap, stops audio engine, and resets FFT engine.
+
+---
+
 ## Notes
 
 - The foundation has no dependency on React Native or other external libraries.
