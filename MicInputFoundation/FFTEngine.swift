@@ -74,6 +74,9 @@ class RealtimeFFTEngine: FFTEngine {
     
     // MARK: - FFTEngine Protocol Implementation
     
+    /// NON-REAL-TIME: Helper method that allocates arrays in the return value.
+    /// For real-time audio callbacks, use `processBufferWritingTo(_:count:outputMagnitudes:outputCapacity:)` instead.
+    /// This method is provided for convenience in non-RT contexts (testing, offline processing, etc.).
     func processBuffer(_ samples: UnsafePointer<Float>, count: Int) -> FFTData? {
         // Early return if disabled - no logging to maintain real-time safety
         guard isEnabled else { return nil }
@@ -251,11 +254,18 @@ class RealtimeFFTEngine: FFTEngine {
     }
     
     private func getCurrentTimestamp() -> TimeInterval {
+        // Cache timebase info to avoid system call per invocation
+        struct TimebaseCache {
+            static var timebase: mach_timebase_info = {
+                var info = mach_timebase_info()
+                mach_timebase_info(&info)
+                return info
+            }()
+            static let nanosToSeconds: Double = Double(timebase.numer) / Double(timebase.denom) / 1_000_000_000.0
+        }
+        
         let now = mach_absolute_time()
-        var timebase = mach_timebase_info()
-        mach_timebase_info(&timebase)
-        let nanoseconds = now * UInt64(timebase.numer) / UInt64(timebase.denom)
-        return TimeInterval(nanoseconds) / 1_000_000_000.0
+        return TimeInterval(now) * TimebaseCache.nanosToSeconds
     }
     
     private func resample(_ input: [Float], targetCount: Int) -> [Float] {

@@ -236,10 +236,17 @@ public final class RealtimeAudioAnalyzer {
         
         if outCount <= 0 { return }
         
-        var now = mach_absolute_time()
-        var timebase = mach_timebase_info_data_t()
-        mach_timebase_info(&timebase)
-        let nowNanos = now * UInt64(timebase.numer) / UInt64(timebase.denom)
+        // Cache timebase info to avoid system call per buffer (real-time safe)
+        struct TimebaseCache {
+            static var timebase: mach_timebase_info_data_t = {
+                var info = mach_timebase_info_data_t()
+                mach_timebase_info(&info)
+                return info
+            }()
+        }
+        
+        let now = mach_absolute_time()
+        let nowNanos = now * UInt64(TimebaseCache.timebase.numer) / UInt64(TimebaseCache.timebase.denom)
         let prev = lastEmit.pointee
         if prev != 0 && nowNanos < prev + refreshIntervalNanos { return }
         
