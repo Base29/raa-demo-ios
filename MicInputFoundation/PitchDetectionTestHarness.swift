@@ -32,8 +32,9 @@ enum PitchDetectionTestHarness {
             durationSeconds: durationSeconds
         )
         
-        // Use a modest frame size compatible with existing pipeline.
-        let frameSize = 2048
+        // Frame size must be > maxTau (sampleRate / minFrequency).
+        // With minFrequency=30Hz at 48kHz, maxTau ~= 1600 so 2048 is OK; we keep extra margin.
+        let frameSize = 4096
         var offset = 0
         var timestamp: TimeInterval = 0
         let frameDuration = Double(frameSize) / sampleRate
