@@ -12,23 +12,24 @@ struct PitchRaw {
 
 /// High-level pitch result exposed to the JS / app layer.
 struct PitchResult {
-    let detectedFrequencyHz: Double
-    let noteName: String
-    let octave: Int
-    /// Clamped cents offset in range [-50, +50].
-    let centsOffset: Double
+    /// Detected frequency in Hz (nil when no pitch is present).
+    let detectedFrequencyHz: Double?
+    let noteName: String?
+    let octave: Int?
+    /// Clamped cents offset in range [-50, +50] (nil when no pitch is present).
+    let centsOffset: Double?
     let confidence: Double
     let inputLevelDbfs: Double?
     let isStable: Bool
     let tuningState: TuningState
 }
 
-enum TuningState {
-    case inTune
-    case near
-    case outOfTune
-    case unstable
-    case silence
+enum TuningState: String {
+    case inTune = "inTune"
+    case near = "near"
+    case outOfTune = "outOfTune"
+    case unstable = "unstable"
+    case silence = "silence"
 }
 
 // MARK: - YIN Pitch Detection Engine
@@ -124,10 +125,10 @@ final class PitchDetectionEngine {
         if isSilent {
             resetOnSilence()
             return PitchResult(
-                detectedFrequencyHz: 0,
-                noteName: "",
-                octave: 0,
-                centsOffset: 0,
+                detectedFrequencyHz: nil,
+                noteName: nil,
+                octave: nil,
+                centsOffset: nil,
                 confidence: 0,
                 inputLevelDbfs: level,
                 isStable: false,
@@ -136,7 +137,18 @@ final class PitchDetectionEngine {
         }
         
         let yin = detectPitchYIN(frame: frame)
-        guard yin.frequencyHz > 0 else { return nil }
+        guard yin.frequencyHz > 0 else {
+            return PitchResult(
+                detectedFrequencyHz: nil,
+                noteName: nil,
+                octave: nil,
+                centsOffset: nil,
+                confidence: 0,
+                inputLevelDbfs: level,
+                isStable: false,
+                tuningState: .unstable
+            )
+        }
         
         let verified = verifySubharmonicsAndChooseFrequency(
             yin: yin,
@@ -152,6 +164,23 @@ final class PitchDetectionEngine {
             fftConfirmation: verified.fftConfirmation
         )
         
+        // If confidence is extremely low, treat as "no pitch" rather than emitting unstable note guesses.
+        if confidence < 0.10 {
+            updateNoiseFloor(with: level)
+            stabilityLogic.reset()
+            wasStableLastFrame = false
+            return PitchResult(
+                detectedFrequencyHz: nil,
+                noteName: nil,
+                octave: nil,
+                centsOffset: nil,
+                confidence: 0,
+                inputLevelDbfs: level,
+                isStable: false,
+                tuningState: .unstable
+            )
+        }
+        
         // Update noise floor only when there is no strong pitch evidence.
         if confidence < 0.25 {
             updateNoiseFloor(with: level)
@@ -163,6 +192,11 @@ final class PitchDetectionEngine {
             centsVariance: centsVariance,
             wasStable: wasStableLastFrame
         )
+        
+        // Explicit smoothing reset on large jumps (Android parity): re-seed smoothing so we don't lag.
+        if shouldResetSmoothing(forNewFrequency: verified.frequencyHz) {
+            reseedAfterLargeJump(newFrequencyHz: verified.frequencyHz)
+        }
         
         let frequency = applySmoothing(to: verified.frequencyHz, alpha: adaptiveAlpha)
         let mapping = NoteMapper.mapFrequency(frequency, calibrationA4: calibrationA4)
@@ -264,6 +298,9 @@ final class PitchDetectionEngine {
         stabilityLogic.reset()
         centsStats.reset()
         wasStableLastFrame = false
+        lastMappedCents = 0
+        lastStableFrequency = 0
+        lastStableCents = 0
     }
 
     private func applySmoothing(to frequency: Double, alpha: Double) -> Double {
@@ -402,6 +439,24 @@ private struct FftConfirmation {
 }
 
 private extension PitchDetectionEngine {
+    func shouldResetSmoothing(forNewFrequency newFrequencyHz: Double) -> Bool {
+        guard hasSmoothed, smoothedFrequency > 0, newFrequencyHz > 0 else { return false }
+        let centsJump = 1200.0 * log2(newFrequencyHz / smoothedFrequency)
+        return abs(centsJump) >= TunerDSPConfig.smoothingResetJumpCents
+    }
+    
+    func reseedAfterLargeJump(newFrequencyHz: Double) {
+        stabilityLogic.reset()
+        centsStats.reset()
+        wasStableLastFrame = false
+        lastStableFrequency = 0
+        lastStableCents = 0
+        lastMappedCents = 0
+        
+        smoothedFrequency = newFrequencyHz
+        hasSmoothed = true
+    }
+    
     func buildPitchResult(
         frequencyHz: Double,
         mapping: NoteMapping,

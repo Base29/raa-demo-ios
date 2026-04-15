@@ -38,6 +38,16 @@ final class StabilityLogic {
 
         if centsOffset < minCents { minCents = centsOffset }
         if centsOffset > maxCents { maxCents = centsOffset }
+        
+        // Defensive restart rule (Android parity): if cents spread gets too wide while accumulating
+        // stability, restart the window so stale history doesn't "carry" through instability.
+        let spread = maxCents - minCents
+        if spread > (2.0 * TunerDSPConfig.stabilityVariationCents) {
+            windowStartTime = timestamp
+            minCents = centsOffset
+            maxCents = centsOffset
+            return false
+        }
 
         let duration = timestamp - windowStartTime
         if duration >= requiredStableDuration &&

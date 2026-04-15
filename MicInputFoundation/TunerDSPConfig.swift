@@ -23,6 +23,11 @@ enum TunerDSPConfig {
     static let stabilityWindowMaxSeconds: TimeInterval = 0.150
     /// Required cents span within the stability window (min..max range).
     static let stabilityVariationCents: Double = 3.0
+    
+    // MARK: - Smoothing reset (large pitch jumps)
+    /// If the new candidate differs by at least this many cents from the current smoothed value,
+    /// re-seed smoothing to avoid lag on abrupt string changes / retunes.
+    static let smoothingResetJumpCents: Double = 75.0
 
     // MARK: - Silence / noise floor
     /// Fallback absolute silence threshold if no noise floor is established.

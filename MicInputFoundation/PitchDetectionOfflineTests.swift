@@ -14,6 +14,9 @@ enum PitchDetectionOfflineTests {
         try testSilenceWithNoisyBackground()
         try testStableDeadZone()
         try testAdaptiveStabilityWindowFasterOnCleanTone()
+        try testStabilityRestartsOnWideCentsSpread()
+        try testSmoothingResetsOnLargePitchJump()
+        try testEmitterPayloadContainsStateAndCleanSilence()
     }
     
     // MARK: - Tests
@@ -38,8 +41,9 @@ enum PitchDetectionOfflineTests {
             t += dt
         }
         guard let r = last else { throw Failure(message: "Low E test: no result") }
-        guard abs(r.detectedFrequencyHz - target) <= 1.5 else {
-            throw Failure(message: "Low E test: expected ~\(target)Hz, got \(r.detectedFrequencyHz)Hz")
+        guard let f = r.detectedFrequencyHz else { throw Failure(message: "Low E test: missing frequency") }
+        guard abs(f - target) <= 1.5 else {
+            throw Failure(message: "Low E test: expected ~\(target)Hz, got \(f)Hz")
         }
     }
     
@@ -77,10 +81,11 @@ enum PitchDetectionOfflineTests {
         guard let r = last else { throw Failure(message: "Harmonic confusion test: no result") }
         
         // Accept either exact f0 or close neighborhood; should not lock to 2*f0.
-        let errF0 = abs(r.detectedFrequencyHz - f0)
-        let errF2 = abs(r.detectedFrequencyHz - f2)
+        guard let f = r.detectedFrequencyHz else { throw Failure(message: "Harmonic confusion test: missing frequency") }
+        let errF0 = abs(f - f0)
+        let errF2 = abs(f - f2)
         guard errF0 < errF2 else {
-            throw Failure(message: "Harmonic confusion test: expected fundamental near \(f0)Hz, got \(r.detectedFrequencyHz)Hz (closer to \(f2)Hz)")
+            throw Failure(message: "Harmonic confusion test: expected fundamental near \(f0)Hz, got \(f)Hz (closer to \(f2)Hz)")
         }
     }
     
@@ -117,8 +122,8 @@ enum PitchDetectionOfflineTests {
         var offset = 0
         while offset + frameSize <= buf.count {
             let frame = Array(buf[offset..<(offset + frameSize)])
-            let r = engine.processAudioFrame(frame, timestamp: t, inputLevelDbfs: nil)
-            if let rr = r, rr.tuningState == .silence {
+            let rr = engine.processAudioFrame(frame, timestamp: t, inputLevelDbfs: nil)
+            if let rr, rr.tuningState == .silence {
                 sawSilence = true
                 break
             }
@@ -169,8 +174,9 @@ enum PitchDetectionOfflineTests {
         guard let s = stableSamples.last else {
             throw Failure(message: "Dead zone test: expected stable samples")
         }
-        guard abs(s.detectedFrequencyHz - base) < 0.8 else {
-            throw Failure(message: "Dead zone test: expected stable readout near \(base)Hz, got \(s.detectedFrequencyHz)Hz")
+        guard let f = s.detectedFrequencyHz else { throw Failure(message: "Dead zone test: missing frequency") }
+        guard abs(f - base) < 0.8 else {
+            throw Failure(message: "Dead zone test: expected stable readout near \(base)Hz, got \(f)Hz")
         }
     }
     
@@ -224,6 +230,94 @@ enum PitchDetectionOfflineTests {
         guard tClean < tJitter else {
             throw Failure(message: "Adaptive stability test: expected clean to stabilize faster (clean=\(tClean)s, jitter=\(tJitter)s)")
         }
+    }
+    
+    static func testStabilityRestartsOnWideCentsSpread() throws {
+        let s = StabilityLogic()
+        let note = "A"
+        let octave = 4
+        
+        // Feed same note but with a spread exceeding allowed range; stability should never lock using stale window.
+        var t: TimeInterval = 0
+        let dt: TimeInterval = 0.020
+        let required: TimeInterval = 0.100
+        
+        // First half: oscillate beyond allowed spread (±10 cents).
+        for i in 0..<8 {
+            let cents = (i % 2 == 0) ? -10.0 : 10.0
+            let stable = s.update(noteName: note, octave: octave, centsOffset: cents, timestamp: t, requiredStableDuration: required)
+            if stable {
+                throw Failure(message: "Stability restart test: should not become stable during wide spread")
+            }
+            t += dt
+        }
+        
+        // Then tighten within ±1 cents; should lock after required duration from the restart point.
+        var locked = false
+        for _ in 0..<10 {
+            locked = s.update(noteName: note, octave: octave, centsOffset: 0.5, timestamp: t, requiredStableDuration: required)
+            t += dt
+            if locked { break }
+        }
+        guard locked else {
+            throw Failure(message: "Stability restart test: expected to lock after returning to tight cents")
+        }
+    }
+    
+    static func testSmoothingResetsOnLargePitchJump() throws {
+        let sr = 48_000.0
+        let engine = PitchDetectionEngine(sampleRate: sr)
+        
+        let a = PitchDetectionTestHarness.generateSineWave(frequency: 220.0, sampleRate: sr, durationSeconds: 0.5)
+        let b = PitchDetectionTestHarness.generateSineWave(frequency: 330.0, sampleRate: sr, durationSeconds: 0.5) // ~ +702 cents
+        
+        let frameSize = 4096
+        let dt = Double(frameSize) / sr
+        var t: TimeInterval = 0
+        
+        func runLast(_ buf: [Float]) -> PitchResult? {
+            var last: PitchResult?
+            var offset = 0
+            while offset + frameSize <= buf.count {
+                let frame = Array(buf[offset..<(offset + frameSize)])
+                last = engine.processAudioFrame(frame, timestamp: t, inputLevelDbfs: -12.0)
+                offset += frameSize
+                t += dt
+            }
+            return last
+        }
+        
+        _ = runLast(a)
+        let firstAfterJump = engine.processAudioFrame(Array(b[0..<frameSize]), timestamp: t, inputLevelDbfs: -12.0)
+        guard let r = firstAfterJump, let f = r.detectedFrequencyHz else {
+            throw Failure(message: "Smoothing reset test: expected frequency after jump")
+        }
+        // With smoothing reseed, we should be close to the new frequency quickly (within ~10Hz for one frame).
+        guard abs(f - 330.0) < 10.0 else {
+            throw Failure(message: "Smoothing reset test: expected fast response near 330Hz, got \(f)Hz")
+        }
+    }
+    
+    static func testEmitterPayloadContainsStateAndCleanSilence() throws {
+        // Silence-style result should produce null note fields and explicit state.
+        let silence = PitchResult(
+            detectedFrequencyHz: nil,
+            noteName: nil,
+            octave: nil,
+            centsOffset: nil,
+            confidence: 0,
+            inputLevelDbfs: -60,
+            isStable: false,
+            tuningState: .silence
+        )
+        let payload = TunerPitchEmitter.makePayload(result: silence)
+        guard payload["isStable"] as? Bool == false else { throw Failure(message: "Emitter payload test: missing/invalid isStable") }
+        guard payload["tuningState"] as? String == "silence" else { throw Failure(message: "Emitter payload test: missing/invalid tuningState") }
+        guard payload["noteName"] == nil else { throw Failure(message: "Emitter payload test: silence noteName should be nil") }
+        guard payload["centsOffset"] == nil else { throw Failure(message: "Emitter payload test: silence centsOffset should be nil") }
+        
+        // Legacy detectedFrequency remains present as number for compatibility.
+        guard (payload["detectedFrequency"] as? Double) == 0 else { throw Failure(message: "Emitter payload test: expected legacy detectedFrequency=0") }
     }
 }
 
