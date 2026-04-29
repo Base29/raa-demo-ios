@@ -11,16 +11,52 @@ public class RecorderEngineIOS: NSObject {
     
     private var audioRecorder: AVAudioRecorder?
     private var meterTimer: Timer?
-    private var startTime: Date?
+    private var isRecording: Bool = false
     
     // Callbacks for events
     public var onMeterUpdate: ((_ rmsDb: Float, _ peakDb: Float) -> Void)?
     public var onDurationUpdate: ((_ duration: Double) -> Void)?
+    public var onStateChange: ((_ state: String) -> Void)?
+    public var onError: ((_ message: String) -> Void)?
+    
+    public override init() {
+        super.init()
+        setupNotifications()
+    }
+    
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+        stopMetering()
+    }
+    
+    private func setupNotifications() {
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(handleInterruption),
+                                               name: AVAudioSession.interruptionNotification,
+                                               object: AVAudioSession.sharedInstance())
+    }
+    
+    @objc private func handleInterruption(notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
+        
+        if type == .began {
+            if isRecording {
+                _ = stopRecording()
+                onStateChange?("interrupted")
+            }
+        }
+    }
     
     /**
      * Start recording to the specified file path.
      */
     public func startRecording(filePath: String) throws {
+        if isRecording {
+            throw NSError(domain: "RecorderEngineIOS", code: 2, userInfo: [NSLocalizedDescriptionKey: "Recording is already in progress"])
+        }
+        
         let fileURL = URL(fileURLWithPath: filePath)
         
         let settings: [String: Any] = [
@@ -33,7 +69,7 @@ public class RecorderEngineIOS: NSObject {
         
         // Setup Audio Session
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
+        try session.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker])
         try session.setActive(true)
         
         audioRecorder = try AVAudioRecorder(url: fileURL, settings: settings)
@@ -42,7 +78,8 @@ public class RecorderEngineIOS: NSObject {
         
         if audioRecorder?.prepareToRecord() == true {
             audioRecorder?.record()
-            startTime = Date()
+            isRecording = true
+            onStateChange?("recording")
             startMetering()
         } else {
             throw NSError(domain: "RecorderEngineIOS", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to prepare recording"])
@@ -53,18 +90,26 @@ public class RecorderEngineIOS: NSObject {
      * Stop recording and return the file path.
      */
     public func stopRecording() -> String? {
-        let path = audioRecorder?.url.path
-        stopMetering()
-        audioRecorder?.stop()
-        audioRecorder = nil
+        guard let recorder = audioRecorder, isRecording else {
+            return nil
+        }
         
-        // Deactivate session if needed
+        let path = recorder.url.path
+        stopMetering()
+        recorder.stop()
+        audioRecorder = nil
+        isRecording = false
+        
+        onStateChange?("stopped")
+        
+        // Deactivate session
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         
         return path
     }
     
     private func startMetering() {
+        stopMetering()
         meterTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             guard let self = self, let recorder = self.audioRecorder, recorder.isRecording else { return }
             
@@ -73,31 +118,29 @@ public class RecorderEngineIOS: NSObject {
             let peakDb = recorder.peakPower(forChannel: 0)
             
             self.onMeterUpdate?(rmsDb, peakDb)
-            
-            if let start = self.startTime {
-                let duration = Date().timeIntervalSince(start)
-                self.onDurationUpdate?(duration)
-            }
+            self.onDurationUpdate?(recorder.currentTime)
         }
     }
     
     private func stopMetering() {
         meterTimer?.invalidate()
         meterTimer = nil
-        startTime = nil
     }
 }
 
 extension RecorderEngineIOS: AVAudioRecorderDelegate {
     public func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
-        // Handle unexpected finish (e.g. interruption)
-        if !flag {
+        if isRecording {
             stopMetering()
+            isRecording = false
+            onStateChange?("stopped")
         }
     }
     
     public func audioRecorderEncodeErrorDidOccur(_ recorder: AVAudioRecorder, error: Error?) {
-        // Handle encode error
         stopMetering()
+        isRecording = false
+        onError?(error?.localizedDescription ?? "Encode error occurred")
     }
 }
+

@@ -9,15 +9,47 @@ import AVFoundation
  */
 public class PlaybackEngineIOS: NSObject {
     
+    public static let shared = PlaybackEngineIOS()
+    
     private var audioPlayer: AVAudioPlayer?
     private var progressTimer: Timer?
     
     private var trimStart: Double = 0
     private var trimEnd: Double = 0
+    private var isLoaded: Bool = false
     
     // Callbacks for events
     public var onProgressUpdate: ((_ currentTime: Double, _ duration: Double) -> Void)?
     public var onStateChange: ((_ state: String) -> Void)?
+    public var onError: ((_ message: String) -> Void)?
+    
+    private override init() {
+        super.init()
+        setupNotifications()
+    }
+    
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+        stopProgressTimer()
+    }
+    
+    private func setupNotifications() {
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(handleInterruption),
+                                               name: AVAudioSession.interruptionNotification,
+                                               object: AVAudioSession.sharedInstance())
+    }
+    
+    @objc private func handleInterruption(notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
+        
+        if type == .began {
+            pause()
+            onStateChange?("interrupted")
+        }
+    }
     
     /**
      * Load an audio file from the specified path with optional trim settings.
@@ -28,25 +60,37 @@ public class PlaybackEngineIOS: NSObject {
         // Stop current playback if any
         stop()
         
-        audioPlayer = try AVAudioPlayer(contentsOf: fileURL)
-        audioPlayer?.delegate = self
-        audioPlayer?.prepareToPlay()
-        
-        self.trimStart = trimStart
-        self.trimEnd = trimEnd > 0 ? trimEnd : (audioPlayer?.duration ?? 0)
-        
-        onStateChange?("loaded")
-        emitProgress()
+        do {
+            audioPlayer = try AVAudioPlayer(contentsOf: fileURL)
+            audioPlayer?.delegate = self
+            audioPlayer?.prepareToPlay()
+            
+            self.trimStart = max(0, trimStart)
+            let duration = audioPlayer?.duration ?? 0
+            self.trimEnd = (trimEnd > 0 && trimEnd <= duration) ? trimEnd : duration
+            
+            if self.trimStart >= self.trimEnd {
+                self.trimStart = 0
+            }
+            
+            isLoaded = true
+            onStateChange?("loaded")
+            emitProgress()
+        } catch {
+            isLoaded = false
+            onError?(error.localizedDescription)
+            throw error
+        }
     }
     
     /**
      * Start or resume playback.
      */
     public func play() {
-        guard let player = audioPlayer else { return }
+        guard let player = audioPlayer, isLoaded else { return }
         
-        // If current position is outside trim bounds, seek to trimStart
-        if player.currentTime < trimStart || (trimEnd > 0 && player.currentTime >= trimEnd) {
+        // Always seek to trimStart for deterministic behavior if at or before trimStart
+        if player.currentTime <= trimStart || player.currentTime >= trimEnd {
             player.currentTime = trimStart
         }
         
@@ -59,7 +103,8 @@ public class PlaybackEngineIOS: NSObject {
      * Pause playback.
      */
     public func pause() {
-        audioPlayer?.pause()
+        guard let player = audioPlayer, player.isPlaying else { return }
+        player.pause()
         onStateChange?("paused")
         stopProgressTimer()
     }
@@ -69,7 +114,7 @@ public class PlaybackEngineIOS: NSObject {
      */
     public func stop() {
         audioPlayer?.stop()
-        audioPlayer?.currentTime = 0
+        audioPlayer?.currentTime = trimStart
         onStateChange?("stopped")
         stopProgressTimer()
         emitProgress()
@@ -79,7 +124,11 @@ public class PlaybackEngineIOS: NSObject {
      * Seek to a specific position in seconds.
      */
     public func seek(to position: Double) {
-        audioPlayer?.currentTime = position
+        guard let player = audioPlayer, isLoaded else { return }
+        
+        // Clamp within trim bounds
+        let absolutePosition = max(trimStart, min(trimEnd, trimStart + position))
+        player.currentTime = absolutePosition
         emitProgress()
     }
     
@@ -89,8 +138,11 @@ public class PlaybackEngineIOS: NSObject {
             guard let self = self, let player = self.audioPlayer else { return }
             
             // Check if reached trimEnd
-            if self.trimEnd > 0 && player.currentTime >= self.trimEnd {
-                self.stop()
+            if player.currentTime >= self.trimEnd {
+                player.pause()
+                player.currentTime = self.trimEnd
+                self.stopProgressTimer()
+                self.emitProgress()
                 self.onStateChange?("completed")
                 return
             }
@@ -105,8 +157,15 @@ public class PlaybackEngineIOS: NSObject {
     }
     
     private func emitProgress() {
-        guard let player = audioPlayer else { return }
-        onProgressUpdate?(player.currentTime, player.duration)
+        guard let player = audioPlayer else { 
+            onProgressUpdate?(0, 0)
+            return 
+        }
+        
+        let relativeCurrentTime = max(0, player.currentTime - trimStart)
+        let relativeDuration = max(0, trimEnd - trimStart)
+        
+        onProgressUpdate?(relativeCurrentTime, relativeDuration)
     }
 }
 
@@ -115,8 +174,5 @@ extension PlaybackEngineIOS: AVAudioPlayerDelegate {
         stopProgressTimer()
         onStateChange?("completed")
     }
-    
-    public func audioPlayerBeginInterruption(_ player: AVAudioPlayer) {
-        stop()
-    }
 }
+

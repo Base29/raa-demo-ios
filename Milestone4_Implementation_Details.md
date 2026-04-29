@@ -1,58 +1,60 @@
 # Milestone 4: Native iOS Recorder and Playback Implementation
 
-This document details the native Swift implementation for the audio recorder and playback engines, designed to be used via a React Native TurboModule bridge.
+This document details the native Swift implementation for the audio recorder and playback engines, separated into two distinct React Native TurboModules.
 
-## 1. Recorder Engine (`RecorderEngineIOS.swift`)
+## 1. Recorder Module (`RecorderModuleIOS.swift` & `RecorderEngineIOS.swift`)
 
-The `RecorderEngineIOS` handles high-quality mono audio recording using the `AVFoundation` framework.
+The `RecorderModuleIOS` manages high-quality mono audio recording.
 
-- **Audio Format**: AAC (MPEG-4 AAC)
-- **Container**: `.m4a`
-- **Sample Rate**: 44.1 kHz
-- **Channels**: 1 (Mono)
-- **Bitrate**: 128 kbps
-- **Metering**: Emits `rmsDb` and `peakDb` values every 100ms during recording.
-- **Duration**: Emits real-time recording duration in seconds.
+- **Audio Format**: AAC (MPEG-4 AAC) in `.m4a` container.
+- **Configuration**: 44.1 kHz, Mono, 128 kbps.
+- **Audio Session**: Uses `.measurement` mode for clean input.
+- **Precision Duration**: Uses `audioRecorder.currentTime` for accurate duration tracking.
+- **Metering**: Emits `rmsDb` and `peakDb` values every 100ms.
 - **Safety**: 
-    - Automatically activates and configures the `AVAudioSession`.
-    - Handles safe file finalization on manual stop or unexpected interruptions (e.g., incoming calls).
-    - Prevents file corruption by ensuring the recorder is properly closed before returning the file path.
+    - **State Guards**: Prevents multiple concurrent recordings.
+    - **Interruption Handling**: Safely stops and finalizes recordings on `AVAudioSession` interruptions.
+    - **Playback Blocking**: Automatically stops any active playback when a recording session starts.
+- **Events**:
+    - `Recorder:onMeter`: Metering values (`rmsDb`, `peakDb`).
+    - `Recorder:onDuration`: Current recording duration.
+    - `Recorder:onState`: `recording`, `stopped`, `interrupted`.
+    - `Recorder:onError`: Error messages.
 
-## 2. Playback Engine (`PlaybackEngineIOS.swift`)
+## 2. Playback Module (`PlaybackModuleIOS.swift` & `PlaybackEngineIOS.swift`)
 
-The `PlaybackEngineIOS` provides a robust audio player with support for virtual trimming.
+The `PlaybackModuleIOS` provides a deterministic audio player with precision trim handling.
 
 - **Core Features**: Load, Play, Pause, Stop, and Seek.
-- **Trim Support**: 
-    - Supports `trimStart` and `trimEnd` metadata.
-    - If `trimStart` is provided, playback starts at that position.
-    - If `trimEnd` is provided, the engine automatically stops playback once `currentTime >= trimEnd`.
-    - **Note**: The original file is never modified or sliced.
-- **Events**: Emits `currentTime` and `duration` every 150ms.
-- **States**: Emits state changes: `loaded`, `playing`, `paused`, `stopped`, `completed`, `error`.
-- **Interruption Handling**: Automatically stops playback if interrupted.
+- **Deterministic Trim Handling**:
+    - **Play Behavior**: Always seeks to `trimStart` if the position is at or before the start, or after the end.
+    - **Relative Progress**: Emits `currentTime` as `player.currentTime - trimStart` and `duration` as `trimEnd - trimStart`.
+    - **Seek Clamping**: Clamps all seek operations within the `trimStart` and `trimEnd` bounds.
+    - **Completion**: Pauses and emits `completed` upon reaching `trimEnd` (does not reset to zero).
+- **Interruption Handling**: Automatically pauses playback on interruptions.
+- **State Guards**: Prevents operations without a valid loaded state.
+- **Events**:
+    - `Playback:onPosition`: Relative `currentTime` and `duration`.
+    - `Playback:onState`: `loaded`, `playing`, `paused`, `stopped`, `completed`, `interrupted`.
+    - `Playback:onError`: Error messages.
 
-## 3. TurboModule Integration (`AudioModuleIOS.swift` & `AudioModuleBridge.mm`)
+## 3. Bridge Integration (`AudioModuleBridge.mm`)
 
-The integration layer bridges the native Swift engines to React Native.
+The native modules are exposed to React Native as two separate entities:
 
-### JS Methods Exposed
-- **Recorder**:
-    - `startRecording(filePath: String)`: Starts recording to the specified path.
-    - `stopRecording()`: Returns a Promise resolving to the finalized file path.
-- **Playback**:
-    - `load(filePath: String, options: { trimStart, trimEnd })`: Prepares a file for playback.
-    - `play(options?)`: Starts or resumes playback (respecting trim bounds).
-    - `pause()`: Pauses playback.
-    - `stop()`: Stops playback and resets position to zero.
-    - `seek(positionInSeconds: Double)`: Jumps to a specific time.
+### RecorderModuleIOS Methods
+- `startRecording(filePath: String)`
+- `stopRecording()`
 
-### Events Emitted to JS
-- `onRecorderMeter`: `{ rmsDb: Float, peakDb: Float }`
-- `onRecorderDuration`: `{ duration: Double }`
-- `onPlaybackPosition`: `{ currentTime: Double, duration: Double }`
-- `onPlaybackState`: `{ state: String }`
+### PlaybackModuleIOS Methods
+- `load(filePath: String, options: { trimStart, trimEnd })`
+- `play(options?)`
+- `pause()`
+- `stop()`
+- `seek(positionInSeconds: Double)`
 
-### Orchestration Rules
-- **Recording Priority**: If `startRecording` is called while playback is active, the engine automatically stops playback immediately to prevent feedback and session conflicts.
-- **Single Instance**: Both engines are managed as single instances within the module, ensuring consistent state between "Preview" and "Full Player" components in the JS app.
+## 4. Production Safety
+- `requiresMainQueueSetup`: Set to `false` for both modules to improve performance.
+- `hasListeners`: Implemented guards to prevent unnecessary event emission when no JS listeners are active.
+- `deinit`: Proper cleanup of timers and observers in both engines and modules.
+

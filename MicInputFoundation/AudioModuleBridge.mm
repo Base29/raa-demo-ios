@@ -1,7 +1,7 @@
 #import <React/RCTBridgeModule.h>
 #import <React/RCTEventEmitter.h>
 
-@interface RCT_EXTERN_MODULE(AudioModuleIOS, RCTEventEmitter)
+@interface RCT_EXTERN_MODULE(RecorderModuleIOS, RCTEventEmitter)
 
 RCT_EXTERN_METHOD(startRecording:(NSString *)filePath
                   resolver:(RCTPromiseResolveBlock)resolve
@@ -9,6 +9,10 @@ RCT_EXTERN_METHOD(startRecording:(NSString *)filePath
 
 RCT_EXTERN_METHOD(stopRecording:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
+
+@end
+
+@interface RCT_EXTERN_MODULE(PlaybackModuleIOS, RCTEventEmitter)
 
 RCT_EXTERN_METHOD(load:(NSString *)filePath
                   options:(NSDictionary *)options
@@ -30,3 +34,4 @@ RCT_EXTERN_METHOD(seek:(double)positionInSeconds
                   rejecter:(RCTPromiseRejectBlock)reject)
 
 @end
+
