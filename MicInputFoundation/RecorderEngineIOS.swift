@@ -43,10 +43,26 @@ public class RecorderEngineIOS: NSObject {
         
         if type == .began {
             if isRecording {
-                _ = stopRecording()
-                onStateChange?("interrupted")
+                finalizeInterruptedRecording()
             }
         }
+    }
+    
+    /**
+     * Internal flow to finalize an interrupted recording without double-emitting events.
+     */
+    private func finalizeInterruptedRecording() {
+        guard let recorder = audioRecorder, isRecording else { return }
+        
+        stopMetering()
+        recorder.stop()
+        audioRecorder = nil
+        isRecording = false
+        
+        onStateChange?("interrupted")
+        
+        // Deactivate session
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
     
     /**
@@ -82,7 +98,9 @@ public class RecorderEngineIOS: NSObject {
             onStateChange?("recording")
             startMetering()
         } else {
-            throw NSError(domain: "RecorderEngineIOS", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to prepare recording"])
+            let errorMsg = "Failed to prepare recording"
+            onError?(errorMsg)
+            throw NSError(domain: "RecorderEngineIOS", code: 1, userInfo: [NSLocalizedDescriptionKey: errorMsg])
         }
     }
     
@@ -135,6 +153,8 @@ extension RecorderEngineIOS: AVAudioRecorderDelegate {
             isRecording = false
             onStateChange?("stopped")
         }
+        // Clear stale reference
+        audioRecorder = nil
     }
     
     public func audioRecorderEncodeErrorDidOccur(_ recorder: AVAudioRecorder, error: Error?) {

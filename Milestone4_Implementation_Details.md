@@ -13,7 +13,7 @@ The `RecorderModuleIOS` manages high-quality mono audio recording.
 - **Metering**: Emits `rmsDb` and `peakDb` values every 100ms.
 - **Safety**: 
     - **State Guards**: Prevents multiple concurrent recordings.
-    - **Interruption Handling**: Safely stops and finalizes recordings on `AVAudioSession` interruptions.
+    - **Interruption Handling**: Uses a dedicated `finalizeInterruptedRecording()` flow to safely stop and finalize recordings on `AVAudioSession` interruptions without redundant event emissions. Emits `interrupted`.
     - **Playback Blocking**: Automatically stops any active playback when a recording session starts.
 - **Events**:
     - `Recorder:onMeter`: Metering values (`rmsDb`, `peakDb`).
@@ -31,7 +31,7 @@ The `PlaybackModuleIOS` provides a deterministic audio player with precision tri
     - **Relative Progress**: Emits `currentTime` as `player.currentTime - trimStart` and `duration` as `trimEnd - trimStart`.
     - **Seek Clamping**: Clamps all seek operations within the `trimStart` and `trimEnd` bounds.
     - **Completion**: Pauses and emits `completed` upon reaching `trimEnd` (does not reset to zero).
-- **Interruption Handling**: Automatically pauses playback on interruptions.
+- **Interruption Handling**: Automatically **stops** playback on interruptions (resetting to `trimStart`). Emits `interrupted`.
 - **State Guards**: Prevents operations without a valid loaded state.
 - **Events**:
     - `Playback:onPosition`: Relative `currentTime` and `duration`.
@@ -56,5 +56,6 @@ The native modules are exposed to React Native as two separate entities:
 ## 4. Production Safety
 - `requiresMainQueueSetup`: Set to `false` for both modules to improve performance.
 - `hasListeners`: Implemented guards to prevent unnecessary event emission when no JS listeners are active.
-- `deinit`: Proper cleanup of timers and observers in both engines and modules.
+- `deinit`: Proper cleanup in modules ensures `recorder.stopRecording()` and `playback.stop()` are called when modules are destroyed, guaranteeing safe file finalization and audio termination.
+- **Event Ordering**: The engines ensure a final progress/duration update is emitted immediately before a `completed` or `interrupted` state change.
 

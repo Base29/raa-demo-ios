@@ -46,7 +46,7 @@ public class PlaybackEngineIOS: NSObject {
               let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
         
         if type == .began {
-            pause()
+            stop()
             onStateChange?("interrupted")
         }
     }
@@ -172,6 +172,7 @@ public class PlaybackEngineIOS: NSObject {
 extension PlaybackEngineIOS: AVAudioPlayerDelegate {
     public func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         stopProgressTimer()
+        emitProgress()
         onStateChange?("completed")
     }
 }

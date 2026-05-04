@@ -13,7 +13,7 @@ public class RecorderModuleIOS: RCTEventEmitter {
     }
     
     deinit {
-        // recorder cleanup is handled in its deinit
+        _ = recorder.stopRecording()
     }
     
     private func setupCallbacks() {

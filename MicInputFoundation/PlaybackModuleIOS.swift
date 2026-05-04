@@ -13,7 +13,7 @@ public class PlaybackModuleIOS: RCTEventEmitter {
     }
     
     deinit {
-        // playback cleanup is handled in its deinit
+        playback.stop()
     }
     
     private func setupCallbacks() {
