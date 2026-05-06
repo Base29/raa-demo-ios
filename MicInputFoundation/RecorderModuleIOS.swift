@@ -13,31 +13,44 @@ public class RecorderModuleIOS: RCTEventEmitter {
     }
     
     deinit {
+        cleanup()
+    }
+    
+    public override func invalidate() {
+        super.invalidate()
+        cleanup()
+    }
+    
+    private func cleanup() {
         _ = recorder.stopRecording()
+        recorder.onMeterUpdate = nil
+        recorder.onDurationUpdate = nil
+        recorder.onStateChange = nil
+        recorder.onError = nil
     }
     
     private func setupCallbacks() {
         recorder.onMeterUpdate = { [weak self] rmsDb, peakDb in
-            self?.sendEventIfPossible(withName: "Recorder:onMeter", body: [
+            self?.sendEventOnMain(withName: "Recorder:onMeter", body: [
                 "rmsDb": rmsDb,
                 "peakDb": peakDb
             ])
         }
         
         recorder.onDurationUpdate = { [weak self] duration in
-            self?.sendEventIfPossible(withName: "Recorder:onDuration", body: [
+            self?.sendEventOnMain(withName: "Recorder:onDuration", body: [
                 "duration": duration
             ])
         }
         
         recorder.onStateChange = { [weak self] state in
-            self?.sendEventIfPossible(withName: "Recorder:onState", body: [
+            self?.sendEventOnMain(withName: "Recorder:onState", body: [
                 "state": state
             ])
         }
         
         recorder.onError = { [weak self] message in
-            self?.sendEventIfPossible(withName: "Recorder:onError", body: [
+            self?.sendEventOnMain(withName: "Recorder:onError", body: [
                 "message": message
             ])
         }
@@ -51,9 +64,10 @@ public class RecorderModuleIOS: RCTEventEmitter {
         hasListeners = false
     }
     
-    private func sendEventIfPossible(withName name: String, body: Any!) {
-        if hasListeners {
-            sendEvent(withName: name, body: body)
+    private func sendEventOnMain(withName name: String, body: Any!) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, self.hasListeners else { return }
+            self.sendEvent(withName: name, body: body)
         }
     }
     
@@ -79,7 +93,7 @@ public class RecorderModuleIOS: RCTEventEmitter {
         }
     }
     
-    @objc(stopRecording:rejecter:)
+    @objc(stopRecording:resolver:rejecter:)
     public func stopRecording(resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
         if let filePath = recorder.stopRecording() {
             resolve(filePath)

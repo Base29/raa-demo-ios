@@ -7,31 +7,63 @@ public class PlaybackModuleIOS: RCTEventEmitter {
     private let playback = PlaybackEngineIOS.shared
     private var hasListeners = false
     
+    // Module-level state tracking for deterministic behavior
+    private var isLoaded: Bool = false
+    private var isPlaying: Bool = false
+    
     public override init() {
         super.init()
         setupCallbacks()
     }
     
     deinit {
+        cleanup()
+    }
+    
+    public override func invalidate() {
+        super.invalidate()
+        cleanup()
+    }
+    
+    private func cleanup() {
         playback.stop()
+        playback.onProgressUpdate = nil
+        playback.onStateChange = nil
+        playback.onError = nil
     }
     
     private func setupCallbacks() {
         playback.onProgressUpdate = { [weak self] currentTime, duration in
-            self?.sendEventIfPossible(withName: "Playback:onPosition", body: [
+            self?.sendEventOnMain(withName: "Playback:onPosition", body: [
                 "currentTime": currentTime,
                 "duration": duration
             ])
         }
         
         playback.onStateChange = { [weak self] state in
-            self?.sendEventIfPossible(withName: "Playback:onState", body: [
+            guard let self = self else { return }
+            
+            // Update internal state tracking
+            if state == "playing" {
+                self.isPlaying = true
+            } else if state == "paused" || state == "stopped" || state == "completed" || state == "interrupted" || state == "error" {
+                self.isPlaying = false
+            }
+            
+            if state == "loaded" {
+                self.isLoaded = true
+            } else if state == "idle" || state == "error" {
+                self.isLoaded = false
+                self.isPlaying = false
+            }
+            
+            self.sendEventOnMain(withName: "Playback:onState", body: [
                 "state": state
             ])
         }
         
         playback.onError = { [weak self] message in
-            self?.sendEventIfPossible(withName: "Playback:onError", body: [
+            self?.sendEventOnMain(withName: "Playback:onError", body: [
                 "message": message
             ])
         }
@@ -45,9 +77,10 @@ public class PlaybackModuleIOS: RCTEventEmitter {
         hasListeners = false
     }
     
-    private func sendEventIfPossible(withName name: String, body: Any!) {
-        if hasListeners {
-            sendEvent(withName: name, body: body)
+    private func sendEventOnMain(withName name: String, body: Any!) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, self.hasListeners else { return }
+            self.sendEvent(withName: name, body: body)
         }
     }
     
@@ -74,12 +107,21 @@ public class PlaybackModuleIOS: RCTEventEmitter {
     
     @objc(play:resolver:rejecter:)
     public func play(options: [String: Any]?, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        guard isLoaded else {
+            reject("PLAYBACK_ERROR", "Cannot play: No file loaded", nil)
+            return
+        }
         playback.play()
         resolve(nil)
     }
     
     @objc(pause:resolver:rejecter:)
     public func pause(resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        guard isPlaying else {
+            // Already paused or not playing, resolve silently but maybe check if loaded
+            resolve(nil)
+            return
+        }
         playback.pause()
         resolve(nil)
     }
@@ -92,6 +134,10 @@ public class PlaybackModuleIOS: RCTEventEmitter {
     
     @objc(seek:resolver:rejecter:)
     public func seek(positionInSeconds: Double, resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        guard isLoaded else {
+            reject("PLAYBACK_ERROR", "Cannot seek: No file loaded", nil)
+            return
+        }
         playback.seek(to: positionInSeconds)
         resolve(nil)
     }
