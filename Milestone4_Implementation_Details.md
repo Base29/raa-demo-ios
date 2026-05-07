@@ -53,9 +53,19 @@ The native modules are exposed to React Native as two separate entities:
 - `stop()`
 - `seek(positionInSeconds: Double)`
 
-## 4. Production Safety
+## 4. Production Safety & REV3 Improvements
 - `requiresMainQueueSetup`: Set to `false` for both modules to improve performance.
 - `hasListeners`: Implemented guards to prevent unnecessary event emission when no JS listeners are active.
-- `deinit`: Proper cleanup in modules ensures `recorder.stopRecording()` and `playback.stop()` are called when modules are destroyed, guaranteeing safe file finalization and audio termination.
+- `deinit` & `invalidate`: Proper cleanup in modules ensures `recorder.stopRecording()` and `playback.stop()` are called *before* the native bridge is torn down, guaranteeing safe file finalization.
+- **Recorder REV3**:
+    - **Safe Stop**: `safeStopRecorder()` ensures no crashes on short recordings or interruptions.
+    - **Silent Cleanup**: Cleanup paths (deinit/invalidate) are silent and emit no UI state.
+    - **Resource Guarantee**: After cleanup, `audioRecorder` is nil, `isRecording` is false, and the audio session is inactive.
+- **Playback REV3**:
+    - **Deterministic Play**: `play()` returns a boolean status, allowing the module to resolve/reject the Promise only if playback actually started.
+    - **Silent Stop**: Calling `stop()` when no file is loaded is a silent no-op (no false "stopped" events).
+    - **Load Isolation**: `load()` fully releases and resets the previous player before initializing a new one.
+    - **Deterministic Error State**: Decode errors trigger a clean state reset, `onError` emission, and session deactivation.
+    - **Route Change (Headphones)**: Unplugging headphones triggers a deterministic interruption flow (stop), ensuring no stale timers or sessions remain active.
 - **Event Ordering**: The engines ensure a final progress/duration update is emitted immediately before a `completed` or `interrupted` state change.
 

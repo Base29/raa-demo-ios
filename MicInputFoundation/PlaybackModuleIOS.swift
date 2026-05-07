@@ -21,12 +21,12 @@ public class PlaybackModuleIOS: RCTEventEmitter {
     }
     
     public override func invalidate() {
-        super.invalidate()
         cleanup()
+        super.invalidate()
     }
     
     private func cleanup() {
-        playback.stop()
+        playback.releaseCurrentPlayerSilently()
         playback.onProgressUpdate = nil
         playback.onStateChange = nil
         playback.onError = nil
@@ -63,7 +63,12 @@ public class PlaybackModuleIOS: RCTEventEmitter {
         }
         
         playback.onError = { [weak self] message in
-            self?.sendEventOnMain(withName: "Playback:onError", body: [
+            guard let self = self else { return }
+            self.isPlaying = false
+            // Note: isLoaded might still be true if the player is still valid but just errored during a seek/play
+            // but for terminal errors, the engine sets state to .error which we handle in onStateChange.
+            
+            self.sendEventOnMain(withName: "Playback:onError", body: [
                 "message": message
             ])
         }
@@ -99,8 +104,12 @@ public class PlaybackModuleIOS: RCTEventEmitter {
         
         do {
             try playback.load(filePath: filePath, trimStart: trimStart, trimEnd: trimEnd)
+            isLoaded = true
+            isPlaying = false
             resolve(nil)
         } catch {
+            isLoaded = false
+            isPlaying = false
             reject("PLAYBACK_ERROR", error.localizedDescription, error)
         }
     }
@@ -111,8 +120,13 @@ public class PlaybackModuleIOS: RCTEventEmitter {
             reject("PLAYBACK_ERROR", "Cannot play: No file loaded", nil)
             return
         }
-        playback.play()
-        resolve(nil)
+        if playback.play() {
+            isPlaying = true
+            resolve(nil)
+        } else {
+            isPlaying = false
+            reject("PLAYBACK_ERROR", "Failed to start playback", nil)
+        }
     }
     
     @objc(pause:resolver:rejecter:)
@@ -128,6 +142,10 @@ public class PlaybackModuleIOS: RCTEventEmitter {
     
     @objc(stop:resolver:rejecter:)
     public func stop(resolve: @escaping RCTPromiseResolveBlock, reject: @escaping RCTPromiseRejectBlock) {
+        guard isLoaded else {
+            resolve(nil) // Silent no-op if nothing loaded
+            return
+        }
         playback.stop()
         resolve(nil)
     }

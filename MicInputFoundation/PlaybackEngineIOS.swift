@@ -73,8 +73,8 @@ public class PlaybackEngineIOS: NSObject {
               let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
         
         if reason == .oldDeviceUnavailable {
-            // Headphones unplugged, pause playback
-            pause()
+            // Headphones unplugged, trigger deterministic interruption
+            stopForInterruption()
         }
     }
     
@@ -84,12 +84,20 @@ public class PlaybackEngineIOS: NSObject {
         try session.setActive(true)
     }
     
-    private func forceCleanup() {
+    /**
+     * Silent reset/release of the current player.
+     * Use this for load() or cleanup() to ensure no UI events are emitted.
+     */
+    public func releaseCurrentPlayerSilently() {
         stopProgressTimer()
         audioPlayer?.stop()
         audioPlayer = nil
         currentState = .idle
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+    
+    private func forceCleanup() {
+        releaseCurrentPlayerSilently()
     }
     
     /**
@@ -126,7 +134,7 @@ public class PlaybackEngineIOS: NSObject {
         let fileURL = URL(fileURLWithPath: filePath)
         
         // Silent reset before loading
-        internalStop(silent: true)
+        releaseCurrentPlayerSilently()
         
         do {
             try configureAudioSession()
@@ -161,17 +169,18 @@ public class PlaybackEngineIOS: NSObject {
     /**
      * Start or resume playback.
      */
-    public func play() {
+    @discardableResult
+    public func play() -> Bool {
         guard let player = audioPlayer, currentState != .idle && currentState != .error else {
             onError?("Cannot play: No file loaded")
-            return
+            return false
         }
         
         do {
             try configureAudioSession()
         } catch {
             onError?(error.localizedDescription)
-            return
+            return false
         }
         
         // Always seek to trimStart for deterministic behavior if at or before trimStart
@@ -183,9 +192,11 @@ public class PlaybackEngineIOS: NSObject {
             currentState = .playing
             onStateChange?("playing")
             startProgressTimer()
+            return true
         } else {
             currentState = .error
             onError?("Failed to start playback")
+            return false
         }
     }
     
@@ -204,6 +215,7 @@ public class PlaybackEngineIOS: NSObject {
      * Stop playback and reset position.
      */
     public func stop() {
+        guard audioPlayer != nil, currentState != .idle else { return }
         internalStop(silent: false, state: .stopped)
     }
     
@@ -275,9 +287,9 @@ extension PlaybackEngineIOS: AVAudioPlayerDelegate {
     }
     
     public func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
-        currentState = .error
-        onError?(error?.localizedDescription ?? "Decode error occurred")
-        internalStop(silent: true)
+        let errorMsg = error?.localizedDescription ?? "Decode error occurred"
+        onError?(errorMsg)
+        internalStop(silent: false, state: .error)
     }
 }
 

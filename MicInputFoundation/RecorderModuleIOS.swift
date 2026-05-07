@@ -17,8 +17,8 @@ public class RecorderModuleIOS: RCTEventEmitter {
     }
     
     public override func invalidate() {
-        super.invalidate()
         cleanup()
+        super.invalidate()
     }
     
     private func cleanup() {

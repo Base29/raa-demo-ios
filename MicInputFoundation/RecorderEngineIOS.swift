@@ -49,18 +49,10 @@ public class RecorderEngineIOS: NSObject {
     }
     
     /**
-     * Force cleanup of all resources without emitting events unless specified.
+     * Force cleanup of all resources without emitting events.
      */
-    private func forceCleanup() {
-        stopMetering()
-        if let recorder = audioRecorder {
-            if recorder.isRecording {
-                recorder.stop()
-            }
-            audioRecorder = nil
-        }
-        isRecording = false
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    public func forceCleanup() {
+        safeStopRecorder(emitState: false)
     }
     
     /**
@@ -68,19 +60,14 @@ public class RecorderEngineIOS: NSObject {
      */
     private func finalizeInterruptedRecording() {
         // Use "interrupted" state instead of "stopped"
-        internalStop(emitState: true, state: "interrupted")
+        safeStopRecorder(emitState: true, state: "interrupted")
     }
     
     /**
-     * Centralized stop logic to ensure consistency.
+     * Centralized stop logic to ensure consistency and safety.
+     * Guaranteed to clear all references and deactivate session.
      */
-    private func internalStop(emitState: Bool, state: String = "stopped") {
-        guard isRecording else { 
-            // Even if not recording, ensure references are cleared if they exist
-            audioRecorder = nil
-            return 
-        }
-        
+    private func safeStopRecorder(emitState: Bool, state: String = "stopped") {
         stopMetering()
         
         if let recorder = audioRecorder {
@@ -161,7 +148,7 @@ public class RecorderEngineIOS: NSObject {
         }
         
         let path = recorder.url.path
-        internalStop(emitState: true, state: "stopped")
+        safeStopRecorder(emitState: true, state: "stopped")
         return path
     }
     
@@ -193,14 +180,14 @@ extension RecorderEngineIOS: AVAudioRecorderDelegate {
             // Requirement 1: State "stopped" should only be emitted from stopRecording().
             // So here we only clean up silently if it was already stopped via internalStop.
             // But if it finished naturally (not expected in this setup), we should still clean up.
-            internalStop(emitState: false)
+            safeStopRecorder(emitState: false)
         }
     }
     
     public func audioRecorderEncodeErrorDidOccur(_ recorder: AVAudioRecorder, error: Error?) {
         let errorMsg = error?.localizedDescription ?? "Encode error occurred"
         onError?(errorMsg)
-        internalStop(emitState: false)
+        safeStopRecorder(emitState: false)
     }
 }
 
