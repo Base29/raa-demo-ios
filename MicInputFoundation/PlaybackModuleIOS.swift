@@ -137,6 +137,7 @@ public class PlaybackModuleIOS: RCTEventEmitter {
             return
         }
         playback.pause()
+        isPlaying = false
         resolve(nil)
     }
     
@@ -147,6 +148,7 @@ public class PlaybackModuleIOS: RCTEventEmitter {
             return
         }
         playback.stop()
+        isPlaying = false
         resolve(nil)
     }
     

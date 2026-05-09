@@ -160,6 +160,7 @@ public class PlaybackEngineIOS: NSObject {
             onStateChange?("loaded")
             emitProgress()
         } catch {
+            releaseCurrentPlayerSilently()
             currentState = .error
             onError?(error.localizedDescription)
             throw error

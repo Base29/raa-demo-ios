@@ -22,7 +22,7 @@ public class RecorderModuleIOS: RCTEventEmitter {
     }
     
     private func cleanup() {
-        _ = recorder.stopRecording()
+        recorder.forceCleanup()
         recorder.onMeterUpdate = nil
         recorder.onDurationUpdate = nil
         recorder.onStateChange = nil
