@@ -34,6 +34,8 @@ public struct AnalyzerEventKeys {
     public static let timestamp = "timestamp"
     public static let rms = "rms"
     public static let peak = "peak"
+    public static let rmsDb = "rmsDb"
+    public static let peakDb = "peakDb"
     public static let volume = "volume"
     public static let sampleRate = "sampleRate"
     public static let fftSize = "fftSize"
@@ -289,6 +291,10 @@ public final class RealtimeAudioAnalyzer {
     ) {
         let timestampMs = Date().timeIntervalSince1970 * 1000.0
         
+        // Convert to dBFS: 20 * log10(linear). Clamp to [-60, 0]. Handle 0 safely.
+        let rmsDb = rms > 0 ? max(-60.0, min(0.0, 20.0 * log10(Double(rms)))) : -60.0
+        let peakDb = peak > 0 ? max(-60.0, min(0.0, 20.0 * log10(Double(peak)))) : -60.0
+        
         var freqArray: [Double] = []
         freqArray.reserveCapacity(frequencyCount)
         for i in 0..<frequencyCount {
@@ -300,6 +306,8 @@ public final class RealtimeAudioAnalyzer {
             AnalyzerEventKeys.timestamp: timestampMs,
             AnalyzerEventKeys.rms: Double(min(1.0, max(0.0, rms))),
             AnalyzerEventKeys.peak: Double(min(1.0, max(0.0, peak))),
+            AnalyzerEventKeys.rmsDb: rmsDb,
+            AnalyzerEventKeys.peakDb: peakDb,
             AnalyzerEventKeys.volume: Double(min(1.0, max(0.0, rms))),
             AnalyzerEventKeys.sampleRate: sampleRate,
             AnalyzerEventKeys.fftSize: fftSize,

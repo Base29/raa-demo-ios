@@ -500,8 +500,12 @@ private extension PitchDetectionEngine {
         }
         let mean = sum / Double(max(1, frame.count))
         let rms = sqrt(mean)
-        if rms <= 0 { return -120.0 }
-        return 20.0 * log10(rms)
+        
+        // Handle zero safely: if rms is 0, emit -60 instead of calculating log10(0).
+        // Clamp result to [-60, 0] as per standard requirements.
+        if rms <= 0 { return -60.0 }
+        let db = 20.0 * log10(rms)
+        return max(-60.0, min(0.0, db))
     }
     
     func isSilence(levelDbfs: Double) -> Bool {

@@ -34,7 +34,8 @@ public class PlaybackModuleIOS: RCTEventEmitter {
     
     private func setupCallbacks() {
         playback.onProgressUpdate = { [weak self] currentTime, duration in
-            self?.sendEventOnMain(withName: "Playback:onPosition", body: [
+            guard let self = self, self.hasListeners else { return }
+            self.sendEventOnMain(withName: "Playback:onPosition", body: [
                 "currentTime": currentTime,
                 "duration": duration
             ])

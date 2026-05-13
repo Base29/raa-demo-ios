@@ -158,8 +158,12 @@ public class RecorderEngineIOS: NSObject {
             guard let self = self, let recorder = self.audioRecorder, self.isRecording, recorder.isRecording else { return }
             
             recorder.updateMeters()
-            let rmsDb = recorder.averagePower(forChannel: 0)
-            let peakDb = recorder.peakPower(forChannel: 0)
+            let rawRms = recorder.averagePower(forChannel: 0)
+            let rawPeak = recorder.peakPower(forChannel: 0)
+            
+            // Clamp to [-60, 0] as per requirements
+            let rmsDb = max(-60.0, min(0.0, rawRms))
+            let peakDb = max(-60.0, min(0.0, rawPeak))
             
             self.onMeterUpdate?(rmsDb, peakDb)
             self.onDurationUpdate?(recorder.currentTime)

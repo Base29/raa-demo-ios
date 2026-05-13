@@ -31,14 +31,16 @@ public class RecorderModuleIOS: RCTEventEmitter {
     
     private func setupCallbacks() {
         recorder.onMeterUpdate = { [weak self] rmsDb, peakDb in
-            self?.sendEventOnMain(withName: "Recorder:onMeter", body: [
+            guard let self = self, self.hasListeners else { return }
+            self.sendEventOnMain(withName: "Recorder:onMeter", body: [
                 "rmsDb": rmsDb,
                 "peakDb": peakDb
             ])
         }
         
         recorder.onDurationUpdate = { [weak self] duration in
-            self?.sendEventOnMain(withName: "Recorder:onDuration", body: [
+            guard let self = self, self.hasListeners else { return }
+            self.sendEventOnMain(withName: "Recorder:onDuration", body: [
                 "duration": duration
             ])
         }
