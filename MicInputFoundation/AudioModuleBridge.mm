@@ -35,3 +35,14 @@ RCT_EXTERN_METHOD(seek:(double)positionInSeconds
 
 @end
 
+@interface RCT_EXTERN_MODULE(RealtimeAudioModuleIOS, RCTEventEmitter)
+
+RCT_EXTERN_METHOD(startAnalysis:(NSDictionary *)options
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(stopAnalysis:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+@end
+

@@ -54,3 +54,4 @@ fastlane/test_output
 *.temp
 .env
 .env.local
+.vscode
