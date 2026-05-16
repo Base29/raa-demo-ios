@@ -54,8 +54,6 @@ public class RealtimeAudioModuleIOS: RCTEventEmitter {
             if let downsampleBins = opts["downsampleBins"] as? Int { analysisOptions.downsampleBins = downsampleBins }
             if let refreshRateHz = opts["refreshRateHz"] as? Double { analysisOptions.refreshRateHz = refreshRateHz }
             if let includeTimeData = opts["includeTimeData"] as? Bool { analysisOptions.includeTimeData = includeTimeData }
-            if let useHanningWindow = opts["useHanningWindow"] as? Bool { analysisOptions.useHanningWindow = useHanningWindow }
-            if let skipZeroPadding = opts["skipZeroPadding"] as? Bool { analysisOptions.skipZeroPadding = skipZeroPadding }
         }
         
         do {
